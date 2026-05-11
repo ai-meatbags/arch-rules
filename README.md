@@ -1,19 +1,203 @@
 # Arch Rules
 
-Baseline architecture rules for product engineering projects.
+Архитектурные правила для продуктовой разработки: общий язык, по которому человек, агент и субагенты могут проектировать, писать, ревьюить и чинить код без каждый раз заново договариваться, что такое "нормально".
 
-The main document is [`arch-rules.md`](arch-rules.md). It defines stable AP
-rules, priority semantics, project stages, and stack-specific expectations for
-web applications with databases, authorization, and predictable growth
-requirements.
+Главный документ: [arch-rules.md](arch-rules.md).
 
-## Use
+## Зачем Это Нужно
 
-Adopt this document as an upstream architecture baseline. Keep project-specific
-deviations in a separate project-owned policy document instead of editing the
-baseline directly.
+Этот репозиторий закрывает такую пользовательскую работу:
 
-## Scope
+> Я быстро собираю продукт, много полагаюсь на агентов и не всегда понимаю, что именно происходит внутри кода. При этом сервисом уже пользуются люди, и мне нужно хотя бы базово доверять тому, что система не разваливается от первого реального продакшн-нагруза, ошибки авторизации, миграции, webhook-а или неудачного рефакторинга.
 
-This repository contains architecture rules only. Delivery process, Definition
-of Done, task templates, and local project conventions belong to each project.
+`arch-rules` не делает код магически хорошим. Он делает другое: задаёт единый набор архитектурных ожиданий, чтобы агент не "вайбкодил" каждый раз с нуля, а проверял решения через понятные инженерные паттерны.
+
+Практический эффект:
+
+- у проекта появляется один язык для обсуждения архитектуры;
+- разные агенты и субагенты получают общий baseline;
+- ревью начинает опираться не на вкус, а на правила с приоритетом;
+- критичные вещи вроде auth, данных, ошибок, миграций и границ модулей перестают быть "потом разберёмся";
+- отклонения от правил становятся явными и записанными, а не случайно размазанными по коду.
+
+Если коротко: внутри всё ещё может быть живое мясо продуктовой разработки, но оно начинает держаться на паттернах, которые скучные разработчики придумали не от хорошей жизни.
+
+## Что Лежит В Правилах
+
+[arch-rules.md](arch-rules.md) содержит AP-правила (`AP-010`, `AP-011`, ...), сгруппированные по темам:
+
+- **Структурные паттерны**: модульный монолит, Ports & Adapters, низкая связность, высокая когезия, composition root, дисциплина импортов.
+- **Границы, контракты и данные**: fail-fast, typed errors, DTO, API-контракты, целостность пользовательских данных, тонкие entry points.
+- **Надёжность, безопасность, наблюдаемость**: security boundary, async discipline, конфигурация, секреты, аудит, traceability, защита от злоупотреблений.
+- **Данные и интеграции**: атомарность команд, конкурентный доступ, идемпотентность, side effects, внешние идентификаторы, удаление и историчность.
+- **Frontend и клиентское приложение**: feature boundaries, разделение client/server/form state, устойчивые UI-состояния, доступность, performance.
+- **Тестирование и качество**: риск-ориентированное тестирование, deterministic fixtures, anti-flake.
+- **Эксплуатация и rollout**: feature flags, health checks, readiness, graceful degradation.
+- **База данных и производительность**: индексы по реальным query patterns, безопасные production migrations, Postgres guardrails.
+- **Условные стековые правила**: TypeScript, Node.js, Next.js, shadcn/ui, Drizzle, design system baseline.
+
+Правила специально имеют стабильные ID, чтобы на них можно было ссылаться в спеках, планах, ревью, PR, issue и agent logs.
+
+## Приоритеты
+
+У каждого правила есть приоритет:
+
+- `critical` - архитектурный инвариант. Нарушение нельзя тихо "починить локально"; нужно менять архитектуру или явно останавливать работу.
+- `baseline` - дефолтный путь проекта. Отклонение возможно, но требует технического обоснования и записи в project-owned policy.
+- `guideline` - сильная рекомендация для дизайна и ревью, но не блокер сама по себе.
+- `reserved` - зарезервированный номер, чтобы не ломать ссылки на AP-ID.
+
+У правил также есть этап:
+
+- `mvp` - важно уже на первом живом продукте;
+- `prod` - важно, когда системой реально пользуются;
+- `scale` - важно при росте нагрузки, данных, интеграций или команды.
+
+Этап не означает "можно не читать". Он означает момент, с которого правило становится обязательным по умолчанию.
+
+## Как Использовать В Проекте
+
+Есть два нормальных режима.
+
+### 1. Upstream Baseline
+
+Проект ссылается на этот репозиторий как на внешний baseline:
+
+```text
+Architecture baseline: https://github.com/ai-meatbags/arch-rules
+```
+
+Локальные отклонения фиксируются отдельно, например:
+
+```text
+docs/project-arch-rules.md
+docs/architecture.md
+AGENTS.md
+```
+
+Важно: не надо редактировать baseline под конкретный проект. Если проекту нужно отступление, оно должно жить в project-owned policy, а не в этом upstream-документе.
+
+### 2. Project-Pinned Copy
+
+Проект копирует [arch-rules.md](arch-rules.md) внутрь себя, например:
+
+```text
+docs/arch-rules.md
+```
+
+Этот вариант удобен, если нужен стабильный snapshot правил на момент принятия архитектурного решения.
+
+Если правила копируются, проект всё равно должен отдельно хранить:
+
+- какие правила применимы;
+- какие не применимы и почему;
+- какие отклонения разрешены;
+- на какой стадии находится проект: `mvp`, `prod`, `scale`.
+
+## Как Использовать С Агентом
+
+Рекомендуемый путь - использовать skills:
+
+- [arch-rules-skills](https://github.com/VanDalkvist/arch-rules-skills) - применяет этот baseline к контексту, планированию и ревью.
+- [arch-improvement-skills](https://github.com/VanDalkvist/arch-improvement-skills) - запускает цикл review -> plan -> fix -> verify -> learn поверх Superpowers и arch-rules.
+- [Superpowers](https://github.com/obra/superpowers) - даёт процесс планирования, TDD и verification gates.
+
+Минимальный порядок для агента:
+
+1. Установить или подтвердить Superpowers.
+2. Установить `arch-rules-skills`.
+3. Найти baseline:
+   - сначала project-pinned rules в целевом проекте;
+   - затем baseline URL, явно названный пользователем;
+   - иначе использовать этот репозиторий: `https://github.com/ai-meatbags/arch-rules`.
+4. Запустить `arch-rules-context` и получить `Architecture Context Map`.
+5. Только после этого писать план, ревьюить реализацию или чинить код.
+
+Агент должен fail-fast, если не найдено что-то обязательное:
+
+```text
+Cannot start arch-rules workflow.
+Missing: <Superpowers skill | arch-rules skill | readable architecture-rules baseline>
+Tried: <paths and URLs checked>
+Next action: <install dependency or provide baseline URL/path>
+```
+
+Нельзя продолжать с "общими лучшими практиками", если baseline не прочитан.
+
+## Architecture Context Map
+
+Перед планированием или ревью агент должен собрать короткую карту:
+
+```markdown
+Architecture Context Map
+- Stage: mvp | prod | scale
+- Source docs: ...
+- Critical AP gates: AP-...
+- Baseline AP gates: AP-...
+- Not applicable: AP-... because ...
+- Deviations: none | ...
+- Plan decisions still open: ...
+```
+
+Это главный рабочий артефакт. Он переводит большой baseline в конкретные правила для текущей задачи.
+
+## Где Использовать
+
+Правила полезны на нескольких этапах:
+
+- **Spec / PRD**: проверить, какие архитектурные ограничения должны попасть в задачу.
+- **Planning**: разбить работу на slices по границам, а не по случайным файлам.
+- **Implementation**: не нарушить слой, контракт, auth boundary, DTO или command/query separation.
+- **Review**: отличить реальный архитектурный дефект от стилистической вкусовщины.
+- **Production hardening**: найти риски вокруг данных, миграций, observability, security и rollout.
+- **Agent orchestration**: дать всем субагентам один набор правил и stop conditions.
+
+## Что Не Входит В Этот Репозиторий
+
+Этот репозиторий не содержит:
+
+- процесс delivery;
+- Definition of Done;
+- task templates;
+- CI/CD workflow;
+- правила конкретной команды;
+- специфику конкретного продукта;
+- список обязательных тестов для каждой фичи.
+
+Это должно жить в project-owned документах. `arch-rules` - baseline, а не вся инженерная операционная система.
+
+## Как Добавлять Отклонения
+
+Отклонение от `critical` правила - это архитектурный конфликт, а не локальная правка.
+
+Отклонение от `baseline` правила допустимо только если есть:
+
+- причина;
+- область действия;
+- срок или условие пересмотра;
+- ссылка на project-owned policy.
+
+Пример:
+
+```markdown
+## Architecture Deviations
+
+- Rule: AP-065 Next.js как дефолт для админок
+- Decision: в этом проекте используется Vite SPA
+- Scope: только public frontend
+- Reason: проект не имеет server-rendered/admin surface
+- Review trigger: появление authenticated admin UI
+```
+
+## Быстрая Проверка Для Агента
+
+Перед работой агент должен уметь ответить:
+
+- Где baseline архитектурных правил?
+- Какая стадия проекта: `mvp`, `prod`, `scale`?
+- Какие `critical` правила применимы?
+- Какие правила не применимы и почему?
+- Есть ли зарегистрированные отклонения?
+- Какой план или ревью ссылается на AP-ID?
+
+Если ответов нет, сначала нужен `Architecture Context Map`, а не код.
